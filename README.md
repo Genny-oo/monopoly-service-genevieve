@@ -1,31 +1,34 @@
-# CS 262 Monopoly Web Service
+# Monopoly Web Data Service
 
-This is the data service application for the
-[CS 262 sample Monopoly project](https://github.com/calvin-cs262-organization/monopoly-project),
- which is deployed here:
+**Live Service URL:**  
+👉 https://monopoly-service-gao4-dxefetbbgaa9d4bk.westus3-01.azurewebsites.net/
 
-- <https://cs262-egbefbd4aae2h0df.canadacentral-01.azurewebsites.net><br>(This URL may vary from year to year.)
+## Overview
+This Azure Web App hosts a REST-based Node.js data service for the CS 262 Monopoly database.  
+It connects to an Azure PostgreSQL instance using environment variables for secure credentials.
 
-Based on this URL, the service implements the following endpoints:
+## API Endpoints
+| Method | Route | Description | Example |
+|--------|-------|--------------|----------|
+| GET | `/` | Health check / root endpoint | [link](https://monopoly-service-gao4-dxefetbbgaa9d4bk.westus3-01.azurewebsites.net/) |
+| GET | `/players` | Returns a list of players | [link](https://monopoly-service-gao4-dxefetbbgaa9d4bk.westus3-01.azurewebsites.net/players) |
+| GET | `/players/{id}` | Returns a specific player by ID | `/players/1` |
+| POST | `/players` | Adds a new player (record in the database) | `curl -X POST -H "Content-Type: application/json" -d '{"name":"Alice"}' <URL>/players` |
+| PUT | `/players/{id}` | Updates a player’s data |  |
+| DELETE | `/players/{id}` | Deletes a player entry |  |
 
-- `/` &mdash; a hello message
-- `/players` &mdash; the full list of players
-- `/players/:id` &mdash; the single player with the given ID (e.g., `/players/1`)
+## Environment Variables (in Azure)
+DB_SERVER=<cs262-postgres-genevieve.postgres>
+DB_PORT=5432
+DB_USER=<Gennie_oo>
+DB_PASSWORD=<Miseducation_2025>
+DB_DATABASE=monopoly
 
-Also, it gives the following responses:
 
-- `/players/-1` &mdash; all invalid IDs like this one return a not-found error
-- `/blob` &mdash; all undefined endpoints like this one return a cannot-get error.
+## Deployment
+- Built and deployed automatically via GitHub Actions.  
+- Workflow file: `.github/workflows/main_monopoly-service-gao4.yml`  
+- Runtime: Node 22 LTS on Linux App Service Free (F1).
 
-It is based on the [standard Azure App Service tutorial for Node.js](https://learn.microsoft.com/en-us/azure/app-service/quickstart-nodejs?tabs=linux&pivots=development-environment-cli).
-
-The database is relational with the schema specified in the `sql/` sub-directory
-and is hosted on [Azure PostgreSQL](https://azure.microsoft.com/en-us/products/postgresql/).
-The database server, user and password are stored as Azure application settings so that they
-aren&rsquo;t exposed in this (public) repo.
-
-We implement this sample service as a separate repo to simplify Azure integration;
-it&rsquo;s easier to auto-deploy a separate repo to Azure. For your team project&rsquo;s
-data service, configure your Azure App Service to auto-deploy from the master/main branch
-of your service repo. See the settings for this in the &ldquo;Deployment Center&rdquo;
-on your Azure service dashboard.
+curl -i https://monopoly-service-gao4-dxefetbbgaa9d4bk.westus3-01.azurewebsites.net/
+curl -i https://monopoly-service-gao4-dxefetbbgaa9d4bk.westus3-01.azurewebsites.net/players
