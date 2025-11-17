@@ -67,6 +67,9 @@ router.get('/players/:id', readPlayer);
 router.put('/players/:id', updatePlayer);
 router.post('/players', createPlayer);
 router.delete('/players/:id', deletePlayer);
+router.get('/games', readGames);
+router.get('/games/:id', readGameDetails);
+router.delete('/games/:id', deleteGame);
 
 // For testing only; vulnerable to SQL injection!
 // router.get('/bad/players/:id', readPlayerBad);
@@ -218,4 +221,84 @@ function deletePlayer(request: Request, response: Response, next: NextFunction):
         .catch((error: Error): void => {
             next(error);
         });
+}
+
+
+/**
+ * Returns a list of all games.
+ * Implements: GET /games
+ */
+function readGames(_request: Request, response: Response, next: NextFunction): void {
+  db.manyOrNone('SELECT ID, time FROM Game ORDER BY ID')
+      .then((data: { id: number; time: string }[]): void => {
+          response.send(data);
+      })
+      .catch((error: Error): void => {
+          next(error);
+      });
+}
+
+/**
+ * Returns player name and score for every player in the specified game.
+ * Implements: GET /games/:id
+ */
+function readGameDetails(request: Request, response: Response, next: NextFunction): void {
+  db.manyOrNone(
+      'SELECT ' +
+      '  g.ID        AS "gameId", ' +
+      '  g.time      AS "time", ' +
+      '  p.ID        AS "playerId", ' +
+      '  p.name      AS "playerName", ' +
+      '  pg.score    AS "score" ' +
+      'FROM Game g ' +
+      'JOIN PlayerGame pg ON g.ID = pg.gameID ' +
+      'JOIN Player     p  ON p.ID = pg.playerID ' +
+      'WHERE g.ID = ${id} ' +        // <-- pg-promise uses request.params.id here
+      'ORDER BY p.name',
+      request.params                 // { id: '...' } comes from the URL
+  )
+      .then((data: any[]): void => {
+          if (data.length === 0) {
+              // No such game, or no players in this game
+              response.sendStatus(404);
+          } else {
+              response.send(data);
+          }
+      })
+      .catch((error: Error): void => {
+          next(error);
+      });
+}
+
+
+/**
+* Deletes a specific game and its related rows.
+* Implements: DELETE /games/:id
+*
+* We must delete from PlayerGame, PlayerState, and PropertyOwnership
+* BEFORE deleting from Game because of foreign key constraints
+* (see monopoly_extended.sql).
+*/
+function deleteGame(request: Request, response: Response, next: NextFunction): void {
+  db.tx((t) => {
+      // Delete all rows that reference this game
+      return t.none('DELETE FROM PlayerGame WHERE gameID = ${id}', request.params)
+          .then(() => {
+              return t.none('DELETE FROM PlayerState WHERE gameID = ${id}', request.params);
+          })
+          .then(() => {
+              return t.none('DELETE FROM PropertyOwnership WHERE gameID = ${id}', request.params);
+          })
+          .then(() => {
+              // Finally delete the Game row and return the deleted ID
+              return t.oneOrNone('DELETE FROM Game WHERE ID = ${id} RETURNING ID', request.params);
+          });
+  })
+      .then((data: { id: number } | null): void => {
+          // If no game row was deleted, the ID didn't exist
+          returnDataOr404(response, data);
+      })
+      .catch((error: Error): void => {
+          next(error);
+      });
 }
