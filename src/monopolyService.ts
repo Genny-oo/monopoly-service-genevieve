@@ -14,7 +14,7 @@
  * See the DB_* variables used by pgPromise.
  *
  * - To execute locally, run the following:
- *      source .env
+ *      source .env.sh
  *      npm start
  *
  * - To guard against SQL injection attacks, this code uses pgPromise's built-in
@@ -44,7 +44,9 @@ import pgPromise from 'pg-promise';
 
 // Import types for compile-time checking.
 import type { Request, Response, NextFunction } from 'express';
-import type { Player, PlayerInput } from './player.js';
+import type { Player, PlayerInput } from './player';
+import type { Game , GameInput} from './game';
+
 
 // Set up the database
 const db = pgPromise()({
@@ -67,26 +69,14 @@ router.get('/players/:id', readPlayer);
 router.put('/players/:id', updatePlayer);
 router.post('/players', createPlayer);
 router.delete('/players/:id', deletePlayer);
-router.get('/games', readGames);
-router.get('/games/:id', readGameDetails);
-router.delete('/games/:id', deleteGame);
+router.get('/games', getGames);
+router.get('/games/:id', getGameById);
+router.delete('/games/:id', deleteGameById);
 
 // For testing only; vulnerable to SQL injection!
-// router.get('/bad/players/:id', readPlayerBad);
+router.get('/bad/players/:id', readPlayerBad);
 
 app.use(router);
-
-// Custom error handler - must be defined AFTER all routes
-app.use((err: Error, _req: Request, res: Response, _next: NextFunction): void => {
-    // Log the full error server-side for debugging
-    console.error('Error:', err.message);
-    console.error('Stack:', err.stack);
-
-    // Send generic error to client (never expose internal details)
-    res.status(500).json({
-        error: 'An internal server error occurred'
-    });
-});
 
 app.listen(port, (): void => {
     console.log(`Listening on port ${port}`);
@@ -145,19 +135,19 @@ function readPlayer(request: Request, response: Response, next: NextFunction): v
 /**
  * This function is intentionally vulnerable to SQL injection attacks because it:
  * - Directly concatenates user input into the SQL query string rather than using parameterized queries.
- * - Allows manyOrNone results, rather than the zero-or-one it should expect.
- * - Uses a PSQL administrator account, which has more privileges than it needs.
- * See `sql/test-sqlInjection.http` for example attack URLs and CURL commands.
+ * - Allows manyOrNone results, rather than the one it should expect.
+ * - Uses a PSQL administrator account, which has more privileges than a typical application account.
+ * See `sql/test-cli.http` for example attack URLs and CURL commands.
  */
-// function readPlayerBad(request: Request, response: Response, next: NextFunction): void {
-//     db.manyOrNone('SELECT * FROM Player WHERE id=' + request.params.id)
-//         .then((data: Player[] | null): void => {
-//             returnDataOr404(response, data);
-//         })
-//         .catch((error: Error): void => {
-//             next(error);
-//         });
-// }
+function readPlayerBad(request: Request, response: Response, next: NextFunction): void {
+    db.manyOrNone('SELECT * FROM Player WHERE id=' + request.params.id)
+        .then((data: Player[] | null): void => {
+            returnDataOr404(response, data);
+        })
+        .catch((error: Error): void => {
+            next(error);
+        });
+}
 
 /**
  * This function updates an existing player's information, returning the
@@ -225,80 +215,67 @@ function deletePlayer(request: Request, response: Response, next: NextFunction):
 
 
 /**
- * Returns a list of all games.
- * Implements: GET /games
+ * Retrieves all games from the database.
  */
-function readGames(_request: Request, response: Response, next: NextFunction): void {
-  db.manyOrNone('SELECT ID, time FROM Game ORDER BY ID')
-      .then((data: { id: number; time: string }[]): void => {
-          response.send(data);
-      })
-      .catch((error: Error): void => {
-          next(error);
-      });
-}
-
-/**
- * Returns player name and score for every player in the specified game.
- * Implements: GET /games/:id
- */
-function readGameDetails(request: Request, response: Response, next: NextFunction): void {
-  db.manyOrNone(
-      'SELECT ' +
-      '  g.ID        AS "gameId", ' +
-      '  g.time      AS "time", ' +
-      '  p.ID        AS "playerId", ' +
-      '  p.name      AS "playerName", ' +
-      '  pg.score    AS "score" ' +
-      'FROM Game g ' +
-      'JOIN PlayerGame pg ON g.ID = pg.gameID ' +
-      'JOIN Player     p  ON p.ID = pg.playerID ' +
-      'WHERE g.ID = ${id} ' +        // <-- pg-promise uses request.params.id here
-      'ORDER BY p.name',
-      request.params                 // { id: '...' } comes from the URL
-  )
-      .then((data: any[]): void => {
-          if (data.length === 0) {
-              // No such game, or no players in this game
-              response.sendStatus(404);
-          } else {
-              response.send(data);
-          }
-      })
-      .catch((error: Error): void => {
-          next(error);
-      });
+function getGames(_request: Request, response: Response, next: NextFunction): void {
+    db.manyOrNone('SELECT * FROM Game')
+        .then((data: { id: number; time: string }[]): void => {
+            response.send(data);
+        })
+        .catch((error: Error): void => {
+            next(error);
+        });
 }
 
 
 /**
-* Deletes a specific game and its related rows.
-* Implements: DELETE /games/:id
-*
-* We must delete from PlayerGame, PlayerState, and PropertyOwnership
-* BEFORE deleting from Game because of foreign key constraints
-* (see monopoly_extended.sql).
-*/
-function deleteGame(request: Request, response: Response, next: NextFunction): void {
-  db.tx((t) => {
-      // Delete all rows that reference this game
-      return t.none('DELETE FROM PlayerGame WHERE gameID = ${id}', request.params)
-          .then(() => {
-              return t.none('DELETE FROM PlayerState WHERE gameID = ${id}', request.params);
-          })
-          .then(() => {
-              return t.none('DELETE FROM PropertyOwnership WHERE gameID = ${id}', request.params);
-          })
-          .then(() => {
-              // Finally delete the Game row and return the deleted ID
-              return t.oneOrNone('DELETE FROM Game WHERE ID = ${id} RETURNING ID', request.params);
-          });
-  })
-      .then((data: { id: number } | null): void => {
-          // If no game row was deleted, the ID didn't exist
-          returnDataOr404(response, data);
-      })
-      .catch((error: Error): void => {
-          next(error);
-      });
+ * Fetches all players who played in a given game alongside their scores by its ID.
+ */
+function fetchPlayersForGame(gameID: number): Promise<Player[]> {
+    return db.manyOrNone(
+        `SELECT Player.*, PlayerGame.score FROM Player
+        JOIN PlayerGame ON Player.id = PlayerGame.playerID
+        WHERE PlayerGame.gameID = $1`,
+        [gameID]
+    );
+}   
+    
+
+function getGameById(request: Request, response: Response, next: NextFunction): void {
+    db.oneOrNone('SELECT * FROM Game WHERE id=$1', [request.params.id])
+    .then(async (data: { id: number; time: string } | null): Promise<void> => {
+        if (!data) {
+            response.status(404).send({ message: 'Game not found' });
+            return;
+            }
+            // Fetch players for the game
+            await fetchPlayersForGame(data.id)
+                .then((players) => {
+                    response.send({ game: data, players });
+                })
+                .catch((error) => {
+                    next(error);
+                });
+        })
+        .catch((error: Error): void => {
+            next(error);
+        });
+}
+
+/**
+ * Deletes a game by ID from the database.
+ */
+function deleteGameById(request: Request, response: Response, next: NextFunction): void {
+    db.tx((t) => {
+        return t.none('DELETE FROM PlayerGame WHERE gameID=${id}', request.params)
+            .then(() => {
+                return t.oneOrNone('DELETE FROM Game WHERE id=${id} RETURNING id', request.params);
+            });
+    })
+        .then((data: { id: number } | null): void => {
+            returnDataOr404(response, data);
+        })
+        .catch((error: Error): void => {
+            next(error);
+        });
 }
