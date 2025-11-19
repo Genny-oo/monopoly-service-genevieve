@@ -1,8 +1,4 @@
-export type Game = {
-  id: number;
-  time: string;
-};
-
-export type GameInput = {
-  time: string;
-};
+export interface Game {
+    id: number;
+    time: string;
+}

@@ -44,9 +44,8 @@ import pgPromise from 'pg-promise';
 
 // Import types for compile-time checking.
 import type { Request, Response, NextFunction } from 'express';
-import type { Player, PlayerInput } from './player';
-import type { Game , GameInput} from './game';
-
+import type { Player, PlayerInput } from './player.js';
+import type { Game } from './game.js';
 
 // Set up the database
 const db = pgPromise()({
@@ -219,14 +218,13 @@ function deletePlayer(request: Request, response: Response, next: NextFunction):
  */
 function getGames(_request: Request, response: Response, next: NextFunction): void {
     db.manyOrNone('SELECT * FROM Game')
-        .then((data: { id: number; time: string }[]): void => {
+        .then((data: Game[]): void => {
             response.send(data);
         })
         .catch((error: Error): void => {
             next(error);
         });
 }
-
 
 /**
  * Fetches all players who played in a given game alongside their scores by its ID.
@@ -243,10 +241,10 @@ function fetchPlayersForGame(gameID: number): Promise<Player[]> {
 
 function getGameById(request: Request, response: Response, next: NextFunction): void {
     db.oneOrNone('SELECT * FROM Game WHERE id=$1', [request.params.id])
-    .then(async (data: { id: number; time: string } | null): Promise<void> => {
-        if (!data) {
-            response.status(404).send({ message: 'Game not found' });
-            return;
+        .then(async (data: Game | null): Promise<void> => {
+            if (!data) {
+                response.status(404).send({ message: 'Game not found' });
+                return;
             }
             // Fetch players for the game
             await fetchPlayersForGame(data.id)
